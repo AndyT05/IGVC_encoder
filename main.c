@@ -14,14 +14,18 @@
 #include "uart0.h"
 #include "rgb_led.h"
 
+// ------------------- CONFIGURATION CONSTANTS -------------------
 #define LEFT_FREQ_IN_MASK   0x40   // PC6 -> WT1CCP0
 #define RIGHT_FREQ_IN_MASK  0x80   // PC7 -> WT1CCP1
 #define TEETH_PER_REV       18
 #define SYSCLK_HZ           40000000
 #define TIRE_CIRCUMFERENCE_IN 45.0f
+#define WHEEL_BASE_IN       21.89f       // 556 mm
+#define RAD_TO_DEG          57.2958f
+#define TIMEOUT_TICKS       (SYSCLK_HZ / 2)  // 0.5s timeout (no motion)
 
 
-const uint32_t TIMEOUT_TICKS = SYSCLK_HZ / 2; // 0.5s timeout (500ms)
+// ------------------- GLOBAL VARIABLES -------------------
 // Left wheel data
 volatile uint32_t left_ticks = 0;
 volatile uint64_t left_edges = 0;
@@ -33,6 +37,13 @@ volatile uint32_t right_ticks = 0;
 volatile uint64_t right_edges = 0;
 float right_rpm = 0;
 float right_distance_in = 0;
+
+// Robot position and heading
+float robot_angle_rad = 0.0f;
+float robot_angle_deg = 0.0f;
+float robot_distance_in = 0.0f;  // forward displacement
+float prev_left_distance_in = 0.0f;
+float prev_right_distance_in = 0.0f;
 
 //-----------------------------------------------------------------------------
 // Hardware Initialization
@@ -56,7 +67,7 @@ void initHw()
 //-----------------------------------------------------------------------------
 // Timer Configuration
 //-----------------------------------------------------------------------------
-void enableDualEncoderMode()
+void enableDualEncoderCaptureMode()
 {
     WTIMER1_CTL_R &= ~(TIMER_CTL_TAEN | TIMER_CTL_TBEN);   // disable both channels
     WTIMER1_CFG_R = 4;                                     // 32-bit timers, A and B independent
@@ -110,39 +121,50 @@ int main(void)
     initUart0();
     initRgb();
     initHw();
-    enableDualEncoderMode();
+    enableDualEncoderCaptureMode();
 
     while (true)
     {
-        // Left wheel RPM & distance
-        uint32_t elapsed = WTIMER1_TAV_R; // ticks since last edge
-        
-        if (left_ticks == 0 || elapsed >= TIMEOUT_TICKS) {
+        // ---------------- RPM CALCULATION ----------------
+        uint32_t elapsed_L = WTIMER1_TAV_R;
+        if (left_ticks == 0 || elapsed_L >= TIMEOUT_TICKS)
             left_rpm = 0.0f;
-        } else {
+        else
             left_rpm = (float)SYSCLK_HZ * 60.0f / (left_ticks * TEETH_PER_REV);
-        }
 
-        left_distance_in = (left_edges / (float)TEETH_PER_REV) * TIRE_CIRCUMFERENCE_IN;
-
-        // Right wheel RPM & distance
-        uint32_t elapsed_right = WTIMER1_TBV_R; // ticks since last edge
-
-        if (right_ticks == 0 || elapsed_right >= TIMEOUT_TICKS) {
+        uint32_t elapsed_R = WTIMER1_TBV_R;
+        if (right_ticks == 0 || elapsed_R >= TIMEOUT_TICKS)
             right_rpm = 0.0f;
-        } else {
+        else
             right_rpm = (float)SYSCLK_HZ * 60.0f / (right_ticks * TEETH_PER_REV);
-        }   
+
+        // ---------------- DISTANCE CALCULATION ----------------
+        left_distance_in  = (left_edges  / (float)TEETH_PER_REV) * TIRE_CIRCUMFERENCE_IN;
         right_distance_in = (right_edges / (float)TEETH_PER_REV) * TIRE_CIRCUMFERENCE_IN;
 
-        // Display
-        char buf[128];
+        // ---------------- ANGLE AND FORWARD DISTANCE ----------------
+        float dL = left_distance_in  - prev_left_distance_in;
+        float dR = right_distance_in - prev_right_distance_in;
+        float delta_theta = (dR - dL) / WHEEL_BASE_IN;
+        robot_angle_rad += delta_theta;
+        robot_angle_deg = robot_angle_rad * RAD_TO_DEG;
+
+        // Average forward movement
+        float delta_distance = (dL + dR) / 2.0f;
+        robot_distance_in += delta_distance;
+
+        prev_left_distance_in = left_distance_in;
+        prev_right_distance_in = right_distance_in;
+
+        // ---------------- DISPLAY ----------------
+        char buf[160];
         sprintf(buf,
-                "L: RPM=%.1f Dist=%.2f in | R: RPM=%.1f Dist=%.2f in\r\n",
-                left_rpm, left_distance_in, right_rpm, right_distance_in);
+            "L:%.1fRPM D=%.2fin | R:%.1fRPM D=%.2fin | θ=%.2f° | TotalDist=%.2fin\r\n",
+            left_rpm, left_distance_in, right_rpm, right_distance_in,
+            robot_angle_deg, robot_distance_in);
         putsUart0(buf);
 
-        waitMicrosecond(200000);
+        waitMicrosecond(200000);  // 0.2s refresh
     }
 }
 
