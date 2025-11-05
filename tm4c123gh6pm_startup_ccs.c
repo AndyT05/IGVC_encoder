@@ -55,7 +55,9 @@ extern uint32_t __STACK_TOP;
 //
 //*****************************************************************************
 // To be added by user
-
+//extern void wideTimer1Isr(void);
+extern void WideTimer1A_Handler(void);
+extern void WideTimer1B_Handler(void);
 //*****************************************************************************
 //
 // The vector table.  Note that the proper constructs must be placed on this to
@@ -179,8 +181,8 @@ void (* const g_pfnVectors[])(void) =
     IntDefaultHandler,                      // Timer 5 subtimer B
     IntDefaultHandler,                      // Wide Timer 0 subtimer A
     IntDefaultHandler,                      // Wide Timer 0 subtimer B
-    IntDefaultHandler,                      // Wide Timer 1 subtimer A
-    IntDefaultHandler,                      // Wide Timer 1 subtimer B
+    WideTimer1A_Handler,                      // Wide Timer 1 subtimer A
+    WideTimer1B_Handler,                      // Wide Timer 1 subtimer B
     IntDefaultHandler,                      // Wide Timer 2 subtimer A
     IntDefaultHandler,                      // Wide Timer 2 subtimer B
     IntDefaultHandler,                      // Wide Timer 3 subtimer A
